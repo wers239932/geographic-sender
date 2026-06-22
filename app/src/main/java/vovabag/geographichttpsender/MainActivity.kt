@@ -12,10 +12,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -221,23 +221,31 @@ class MainActivity : ComponentActivity() {
                         )
 
                         // FAB menu at bottom-left, overlaying other elements
-                        Box(
+                        Row(
                             modifier = Modifier
                                 .align(Alignment.BottomStart)
-                                .padding(start = 16.dp, bottom = 16.dp)
+                                .padding(start = 16.dp, bottom = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
+                            // Expanded options to the right of "+"
                             AnimatedVisibility(
                                 visible = fabExpanded,
-                                enter = fadeIn() + scaleIn(),
-                                exit = fadeOut() + scaleOut()
+                                enter = fadeIn() + expandHorizontally(),
+                                exit = fadeOut() + shrinkHorizontally()
                             ) {
-                                Column(
-                                    horizontalAlignment = Alignment.Start,
-                                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                                    modifier = Modifier.padding(bottom = 16.dp)
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(end = 12.dp)
                                 ) {
                                     // Folder option
                                     Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            "Папка",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
                                         SmallFloatingActionButton(
                                             onClick = {
                                                 fabExpanded = false
@@ -248,16 +256,16 @@ class MainActivity : ComponentActivity() {
                                         ) {
                                             Icon(Icons.Default.CreateNewFolder, null)
                                         }
-                                        Text(
-                                            "Папка",
-                                            modifier = Modifier.padding(start = 8.dp),
-                                            style = MaterialTheme.typography.labelMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
                                     }
 
                                     // Point option
                                     Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            "Точка",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
                                         SmallFloatingActionButton(
                                             onClick = {
                                                 fabExpanded = false
@@ -269,12 +277,6 @@ class MainActivity : ComponentActivity() {
                                         ) {
                                             Icon(Icons.Default.LocationOn, null)
                                         }
-                                        Text(
-                                            "Точка",
-                                            modifier = Modifier.padding(start = 8.dp),
-                                            style = MaterialTheme.typography.labelMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
                                     }
                                 }
                             }
