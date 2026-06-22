@@ -57,12 +57,12 @@ class GeofenceService : Service() {
 
         // Адаптивные интервалы обновления (миллисекунды)
         private const val FAR_INTERVAL_MS = 120000L    // 2 мин — далеко (>1 км от всех активных точек)
-        private const val MID_INTERVAL_MS = 20000L     // 20 сек — средне (>600 м, но <1 км)
-        private const val NEAR_INTERVAL_MS = 10000L    // 10 сек — близко (<600 м)
+        private const val MID_INTERVAL_MS = 20000L     // 20 сек — средне (>500 м, но <1 км)
+        private const val NEAR_INTERVAL_MS = 1000L    // 1 сек — близко (<500 м)
 
         // Пороговые расстояния
         private const val FAR_DISTANCE = 1000f    // 1 км
-        private const val MID_DISTANCE = 600f     // 600 м
+        private const val MID_DISTANCE = 500f     // 500 м
 
         // Период обновления уведомления
         private const val NOTIFICATION_UPDATE_MS = 5000L
