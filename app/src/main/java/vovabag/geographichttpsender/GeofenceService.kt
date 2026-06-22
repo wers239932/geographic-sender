@@ -286,9 +286,10 @@ class GeofenceService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        val activeCount = targetPoints.count { it.isEnabled }
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Geographic HTTP Sender")
-            .setContentText("Отслеживание активно (${targetPoints.size} точек)")
+            .setContentText("Отслеживание активно ($activeCount из ${targetPoints.size} точек)")
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -297,12 +298,13 @@ class GeofenceService : Service() {
     }
 
     private fun updateNotification() {
-        val statusText = targetPoints.joinToString("\n") { point ->
+        val activePoints = targetPoints.filter { it.isEnabled }
+        val statusText = activePoints.joinToString("\n") { point ->
             "${point.name.ifBlank { point.id.take(8) }}: ${lastRequestStatus[point.id] ?: "Ожидание..."}"
         }
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Geographic HTTP Sender")
-            .setContentText("Активно: ${targetPoints.size} точек")
+            .setContentText("Активно: ${activePoints.size} из ${targetPoints.size} точек")
             .setStyle(NotificationCompat.BigTextStyle().bigText(statusText))
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setOngoing(true)
