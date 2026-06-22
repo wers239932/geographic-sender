@@ -475,7 +475,7 @@ private fun FolderCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(folder.label, style = MaterialTheme.typography.titleMedium)
                     Text(
-                        text = "Точек ${folder.points.size} | Активно ${folder.enabledCount}/${folder.points.size}",
+                        text = "Точек ${folder.points.size} \n Активно ${folder.enabledCount}/${folder.points.size}",
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
