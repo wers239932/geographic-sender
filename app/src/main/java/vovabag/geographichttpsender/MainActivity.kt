@@ -205,7 +205,7 @@ class MainActivity : ComponentActivity() {
                             folders = folders,
                             points = points,
                             testResults = testResults,
-                            padding = PaddingValues(0),
+                            padding = PaddingValues(0.dp),
                             isServiceRunning = isServiceRunning,
                             onDeletePoint = viewModel::deletePoint,
                             onTestPoint = viewModel::testPoint,
