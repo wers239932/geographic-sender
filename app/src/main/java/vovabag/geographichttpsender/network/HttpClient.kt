@@ -12,18 +12,22 @@ import java.util.concurrent.TimeUnit
 
 private const val TAG = "HttpClient"
 
-class HttpClient {
+class HttpClient(
+    connectTimeoutSec: Int = 30,
+    readTimeoutSec: Int = 30,
+    writeTimeoutSec: Int = 30
+) {
     private val client = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(connectTimeoutSec.toLong(), TimeUnit.SECONDS)
+        .readTimeout(readTimeoutSec.toLong(), TimeUnit.SECONDS)
+        .writeTimeout(writeTimeoutSec.toLong(), TimeUnit.SECONDS)
         .followRedirects(true)
         .followSslRedirects(true)
         .build()
 
     suspend fun sendRequest(config: HttpConfig): Result<String> = withContext(Dispatchers.IO) {
         try {
-            Log.d(TAG, "📤 Отправка запроса: ${config.method} ${config.url}")
+            Log.d(TAG, "Отправка запроса: ${config.method} ${config.url}")
             
             val requestBuilder = Request.Builder().url(config.url)
 
@@ -53,7 +57,7 @@ class HttpClient {
             
             client.newCall(request).execute().use { response ->
                 val responseBody = response.body?.string() ?: ""
-                Log.d(TAG, "  ✅ Ответ: ${response.code} ${response.message}")
+                Log.d(TAG, "  Ответ: ${response.code} ${response.message}")
                 Log.d(TAG, "  Body: ${responseBody.take(200)}")
                 
                 if (response.isSuccessful) {
@@ -63,7 +67,7 @@ class HttpClient {
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "  ❌ Ошибка запроса: ${e.message}", e)
+            Log.e(TAG, "  Ошибка запроса: ${e.message}", e)
             Result.failure(e)
         }
     }

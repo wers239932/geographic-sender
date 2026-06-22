@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -89,6 +90,7 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
 import vovabag.geographichttpsender.model.DirectionFilter
+import vovabag.geographichttpsender.model.GlobalSettings
 import vovabag.geographichttpsender.model.HttpConfig
 import vovabag.geographichttpsender.model.HttpMethod
 import vovabag.geographichttpsender.model.PointFolder
@@ -123,8 +125,10 @@ class MainActivity : ComponentActivity() {
                 val folders by viewModel.pointFolders.collectAsState()
                 val isServiceRunning by viewModel.isServiceRunning.collectAsState()
                 val testResults by viewModel.testResults.collectAsState()
+                val globalSettings by viewModel.globalSettings.collectAsState()
                 var showAddFolderDialog by remember { mutableStateOf(false) }
                 var showAddPointDialog by remember { mutableStateOf(false) }
+                var showGlobalSettingsDialog by remember { mutableStateOf(false) }
                 var createPointInFolder by remember { mutableStateOf<String?>(null) }
                 var editingPoint by remember { mutableStateOf<TargetPoint?>(null) }
                 var fabExpanded by remember { mutableStateOf(false) }
@@ -144,6 +148,10 @@ class MainActivity : ComponentActivity() {
                                     .padding(horizontal = 16.dp, vertical = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+                                IconButton(onClick = { showGlobalSettingsDialog = true }) {
+                                    Icon(Icons.Default.Settings, contentDescription = "Настройки")
+                                }
+                                Spacer(modifier = Modifier.width(4.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = if (isServiceRunning) "Сервис активен" else "Сервис остановлен",
@@ -305,6 +313,17 @@ class MainActivity : ComponentActivity() {
                         onConfirm = { folderName ->
                             viewModel.addFolder(folderName)
                             showAddFolderDialog = false
+                        }
+                    )
+                }
+
+                if (showGlobalSettingsDialog) {
+                    GlobalSettingsDialog(
+                        currentSettings = globalSettings,
+                        onDismiss = { showGlobalSettingsDialog = false },
+                        onSave = { newSettings ->
+                            viewModel.saveGlobalSettings(newSettings)
+                            showGlobalSettingsDialog = false
                         }
                     )
                 }
@@ -614,6 +633,160 @@ fun PointCard(
             }
         }
     }
+}
+
+@Composable
+private fun GlobalSettingsDialog(
+    currentSettings: GlobalSettings,
+    onDismiss: () -> Unit,
+    onSave: (GlobalSettings) -> Unit
+) {
+    var connectTimeout by remember(currentSettings) { mutableStateOf(currentSettings.connectTimeoutSec.toString()) }
+    var readTimeout by remember(currentSettings) { mutableStateOf(currentSettings.readTimeoutSec.toString()) }
+    var writeTimeout by remember(currentSettings) { mutableStateOf(currentSettings.writeTimeoutSec.toString()) }
+    var notificationUpdate by remember(currentSettings) { mutableStateOf(currentSettings.notificationUpdateSec.toString()) }
+    var farDistance by remember(currentSettings) { mutableStateOf(currentSettings.farDistanceM.toString()) }
+    var midDistance by remember(currentSettings) { mutableStateOf(currentSettings.midDistanceM.toString()) }
+    var farInterval by remember(currentSettings) { mutableStateOf(currentSettings.farIntervalSec.toString()) }
+    var midInterval by remember(currentSettings) { mutableStateOf(currentSettings.midIntervalSec.toString()) }
+    var nearInterval by remember(currentSettings) { mutableStateOf(currentSettings.nearIntervalSec.toString()) }
+    var statusFreshness by remember(currentSettings) { mutableStateOf(currentSettings.statusFreshnessSec.toString()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Глобальные настройки") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Text(
+                    "HTTP таймауты",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                SettingsNumberField(
+                    label = "Таймаут подключения (сек)",
+                    value = connectTimeout,
+                    onValueChange = { connectTimeout = it }
+                )
+                SettingsNumberField(
+                    label = "Таймаут чтения (сек)",
+                    value = readTimeout,
+                    onValueChange = { readTimeout = it }
+                )
+                SettingsNumberField(
+                    label = "Таймаут записи (сек)",
+                    value = writeTimeout,
+                    onValueChange = { writeTimeout = it }
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    "Уведомления",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                SettingsNumberField(
+                    label = "Интервал обновления уведомления (сек)",
+                    value = notificationUpdate,
+                    onValueChange = { notificationUpdate = it }
+                )
+                SettingsNumberField(
+                    label = "Актуальность статуса отправки (сек)",
+                    value = statusFreshness,
+                    onValueChange = { statusFreshness = it }
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    "Границы расстояний (м)",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                SettingsNumberField(
+                    label = "Дальняя граница (м)",
+                    value = farDistance,
+                    onValueChange = { farDistance = it }
+                )
+                SettingsNumberField(
+                    label = "Средняя граница (м)",
+                    value = midDistance,
+                    onValueChange = { midDistance = it }
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    "GPS интервалы (сек)",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                SettingsNumberField(
+                    label = "Интервал \"далеко\" (сек)",
+                    value = farInterval,
+                    onValueChange = { farInterval = it }
+                )
+                SettingsNumberField(
+                    label = "Интервал \"средне\" (сек)",
+                    value = midInterval,
+                    onValueChange = { midInterval = it }
+                )
+                SettingsNumberField(
+                    label = "Интервал \"близко\" (сек)",
+                    value = nearInterval,
+                    onValueChange = { nearInterval = it }
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onSave(
+                        GlobalSettings(
+                            connectTimeoutSec = connectTimeout.toIntOrNull() ?: 30,
+                            readTimeoutSec = readTimeout.toIntOrNull() ?: 30,
+                            writeTimeoutSec = writeTimeout.toIntOrNull() ?: 30,
+                            notificationUpdateSec = notificationUpdate.toIntOrNull() ?: 5,
+                            farDistanceM = farDistance.toIntOrNull() ?: 1000,
+                            midDistanceM = midDistance.toIntOrNull() ?: 500,
+                            farIntervalSec = farInterval.toIntOrNull() ?: 120,
+                            midIntervalSec = midInterval.toIntOrNull() ?: 20,
+                            nearIntervalSec = nearInterval.toIntOrNull() ?: 1,
+                            statusFreshnessSec = statusFreshness.toIntOrNull() ?: 5
+                        )
+                    )
+                }
+            ) {
+                Text("Сохранить")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) {
+                Text("Отмена")
+            }
+        }
+    )
+}
+
+@Composable
+private fun SettingsNumberField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = { onValueChange(it.filter { c -> c.isDigit() }) },
+        label = { Text(label) },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        modifier = Modifier.fillMaxWidth()
+    )
+    Spacer(modifier = Modifier.height(8.dp))
 }
 
 @Composable

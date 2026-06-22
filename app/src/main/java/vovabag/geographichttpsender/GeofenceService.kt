@@ -14,6 +14,7 @@ import androidx.core.app.NotificationCompat
 import com.google.android.gms.location.*
 import kotlinx.coroutines.*
 import vovabag.geographichttpsender.data.SettingsRepository
+import vovabag.geographichttpsender.model.GlobalSettings
 import vovabag.geographichttpsender.model.TargetPoint
 import vovabag.geographichttpsender.network.HttpClient
 import vovabag.geographichttpsender.util.GeoUtils
@@ -24,9 +25,9 @@ private const val TAG = "GeofenceService"
 class GeofenceService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val fusedLocationClient by lazy { LocationServices.getFusedLocationProviderClient(this) }
-    private val httpClient = HttpClient()
     private val repository by lazy { SettingsRepository(this) }
 
+    private var httpClient: HttpClient = HttpClient()
     private var targetPoints = emptyList<TargetPoint>()
     private var locationCallback: LocationCallback? = null
     private val lastRequestTime = mutableMapOf<String, Long>()
@@ -44,8 +45,15 @@ class GeofenceService : Service() {
     // Последнее известное расстояние до каждой точки
     private val lastKnownDistance = mutableMapOf<String, Float>()
 
-    private var currentUpdateIntervalMs = FAR_INTERVAL_MS
+    // Время последнего location-апдейта (для расчёта "до следующего")
+    @Volatile
+    private var lastLocationUpdateTimeMs: Long = 0L
+
+    private var currentUpdateIntervalMs: Long = 0L
     private var notificationUpdateJob: Job? = null
+    private var settings = GlobalSettings.DEFAULT
+
+    private var settingsObservationJob: Job? = null
 
     companion object {
         const val CHANNEL_ID = "geofence_service_channel"
@@ -54,20 +62,6 @@ class GeofenceService : Service() {
         const val ACTION_START = "ACTION_START"
         const val ACTION_STOP = "ACTION_STOP"
         const val ACTION_UPDATE_POINTS = "ACTION_UPDATE_POINTS"
-
-        // Адаптивные интервалы обновления (миллисекунды)
-        private const val FAR_INTERVAL_MS = 120000L    // 2 мин — далеко (>1 км от всех активных точек)
-        private const val MID_INTERVAL_MS = 20000L     // 20 сек — средне (>500 м, но <1 км)
-        private const val NEAR_INTERVAL_MS = 1000L    // 1 сек — близко (<500 м)
-
-        // Пороговые расстояния
-        private const val FAR_DISTANCE = 1000f    // 1 км
-        private const val MID_DISTANCE = 500f     // 500 м
-
-        // Период обновления уведомления
-        private const val NOTIFICATION_UPDATE_MS = 5000L
-        // Статус отправки считается актуальным N секунд
-        private const val STATUS_FRESHNESS_MS = 5000L
     }
 
     override fun onCreate() {
@@ -96,6 +90,15 @@ class GeofenceService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
+                serviceScope.launch {
+                    settings = repository.getGlobalSettingsOnce()
+                    currentUpdateIntervalMs = settings.farIntervalSec * 1000L
+                    httpClient = HttpClient(
+                        connectTimeoutSec = settings.connectTimeoutSec,
+                        readTimeoutSec = settings.readTimeoutSec,
+                        writeTimeoutSec = settings.writeTimeoutSec
+                    )
+                }
                 val pointsJson = intent.getStringExtra(EXTRA_TARGET_POINTS)
                 if (!pointsJson.isNullOrEmpty()) {
                     targetPoints = parseTargetPoints(pointsJson)
@@ -105,10 +108,12 @@ class GeofenceService : Service() {
                 serviceScope.launch { repository.setServiceRunning(true) }
                 startLocationUpdates()
                 startNotificationUpdater()
+                startSettingsObservation()
             }
             ACTION_STOP -> {
                 stopLocationUpdates()
                 stopNotificationUpdater()
+                stopSettingsObservation()
                 serviceScope.launch { repository.setServiceRunning(false) }
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -129,6 +134,7 @@ class GeofenceService : Service() {
         super.onDestroy()
         stopLocationUpdates()
         stopNotificationUpdater()
+        stopSettingsObservation()
         serviceScope.launch { repository.setServiceRunning(false) }
         serviceScope.cancel()
         try {
@@ -146,13 +152,39 @@ class GeofenceService : Service() {
         super.onTaskRemoved(rootIntent)
     }
 
+    // ── Наблюдение за настройками ──
+
+    private fun startSettingsObservation() {
+        stopSettingsObservation()
+        settingsObservationJob = serviceScope.launch {
+            repository.globalSettings.collect { newSettings ->
+                if (newSettings != settings) {
+                    settings = newSettings
+                    httpClient = HttpClient(
+                        connectTimeoutSec = settings.connectTimeoutSec,
+                        readTimeoutSec = settings.readTimeoutSec,
+                        writeTimeoutSec = settings.writeTimeoutSec
+                    )
+                    // Переключить интервал уведомлений — перезапустить updater
+                    startNotificationUpdater()
+                    Log.d(TAG, "Настройки обновлены из DataStore")
+                }
+            }
+        }
+    }
+
+    private fun stopSettingsObservation() {
+        settingsObservationJob?.cancel()
+        settingsObservationJob = null
+    }
+
     // ── Периодическое обновление уведомления ──
 
     private fun startNotificationUpdater() {
         stopNotificationUpdater()
         notificationUpdateJob = serviceScope.launch {
             while (isActive) {
-                delay(NOTIFICATION_UPDATE_MS)
+                delay(settings.notificationUpdateSec * 1000L)
                 updateNotificationNow()
             }
         }
@@ -173,7 +205,8 @@ class GeofenceService : Service() {
     // ── Location ──
 
     private fun startLocationUpdates() {
-        requestLocationUpdatesWithInterval(FAR_INTERVAL_MS)
+        val interval = if (currentUpdateIntervalMs > 0) currentUpdateIntervalMs else settings.farIntervalSec * 1000L
+        requestLocationUpdatesWithInterval(interval)
     }
 
     private fun requestLocationUpdatesWithInterval(intervalMs: Long) {
@@ -181,12 +214,13 @@ class GeofenceService : Service() {
             fusedLocationClient.removeLocationUpdates(it)
         }
 
+        val nearIntervalMs = settings.nearIntervalSec * 1000L
         val locationRequest = LocationRequest.Builder(
             Priority.PRIORITY_BALANCED_POWER_ACCURACY,
             intervalMs
         ).apply {
             setMinUpdateIntervalMillis(intervalMs / 2)
-            if (intervalMs <= NEAR_INTERVAL_MS) {
+            if (intervalMs <= nearIntervalMs) {
                 setMaxUpdateDelayMillis(intervalMs * 2)
             } else {
                 setMaxUpdateDelayMillis(intervalMs)
@@ -196,6 +230,7 @@ class GeofenceService : Service() {
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 result.lastLocation?.let { location ->
+                    lastLocationUpdateTimeMs = System.currentTimeMillis()
                     refreshWakeLock()
                     checkProximityToPoints(location)
                 }
@@ -215,9 +250,12 @@ class GeofenceService : Service() {
         val activePoints = targetPoints.filter { it.isEnabled }
 
         if (activePoints.isEmpty()) {
-            switchIntervalIfNeeded(FAR_INTERVAL_MS)
+            switchIntervalIfNeeded(settings.farIntervalSec * 1000L)
             return
         }
+
+        val farDist = settings.farDistanceM.toFloat()
+        val midDist = settings.midDistanceM.toFloat()
 
         activePoints.forEach { point ->
             val distance = GeoUtils.calculateDistance(
@@ -263,10 +301,14 @@ class GeofenceService : Service() {
             sendHttpRequest(point)
         }
 
+        val nearIntervalMs = settings.nearIntervalSec * 1000L
+        val midIntervalMs = settings.midIntervalSec * 1000L
+        val farIntervalMs = settings.farIntervalSec * 1000L
+
         val newInterval = when {
-            minDistance < MID_DISTANCE -> NEAR_INTERVAL_MS
-            minDistance < FAR_DISTANCE -> MID_INTERVAL_MS
-            else -> FAR_INTERVAL_MS
+            minDistance < midDist -> nearIntervalMs
+            minDistance < farDist -> midIntervalMs
+            else -> farIntervalMs
         }
 
         switchIntervalIfNeeded(newInterval)
@@ -330,8 +372,9 @@ class GeofenceService : Service() {
     private fun updateNotificationNow() {
         val now = System.currentTimeMillis()
         val activePoints = targetPoints.filter { it.isEnabled }
+        val statusFreshnessMs = settings.statusFreshnessSec * 1000L
 
-        val statusText = activePoints.joinToString("\n") { point ->
+        val statusLines = activePoints.map { point ->
             val dist = lastKnownDistance[point.id]
             val distStr = if (dist != null) "${dist.toInt()}м" else "—"
 
@@ -339,8 +382,8 @@ class GeofenceService : Service() {
             val statusStr = when {
                 info == null -> null
                 info.status == SendStatus.SENDING -> "отправляется"
-                info.status == SendStatus.SENT && (now - info.timestamp) < STATUS_FRESHNESS_MS -> "отправлено"
-                info.status == SendStatus.ERROR && (now - info.timestamp) < STATUS_FRESHNESS_MS -> "не пришло"
+                info.status == SendStatus.SENT && (now - info.timestamp) < statusFreshnessMs -> "отправлено"
+                info.status == SendStatus.ERROR && (now - info.timestamp) < statusFreshnessMs -> "не пришло"
                 else -> null
             }
 
@@ -348,10 +391,30 @@ class GeofenceService : Service() {
             if (statusStr != null) "$name: $distStr, $statusStr" else "$name: $distStr"
         }
 
+        // Последняя строка — время до следующего обновления расстояний
+        val timeToNextUpdateSec = if (lastLocationUpdateTimeMs > 0 && currentUpdateIntervalMs > 0) {
+            val elapsed = now - lastLocationUpdateTimeMs
+            val remaining = currentUpdateIntervalMs - elapsed
+            if (remaining > 0) (remaining / 1000f).coerceAtLeast(0f) else 0f
+        } else null
+
+        val lastLine = if (timeToNextUpdateSec != null) {
+            "Обновление через ${"%.0f".format(timeToNextUpdateSec)}с"
+        } else {
+            null
+        }
+
+        val fullText = if (lastLine != null) {
+            if (statusLines.isEmpty()) lastLine
+            else (statusLines + lastLine).joinToString("\n")
+        } else {
+            statusLines.joinToString("\n")
+        }
+
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Geographic HTTP Sender")
             .setContentText("Активно ${activePoints.size} из ${targetPoints.size} точек")
-            .setStyle(NotificationCompat.BigTextStyle().bigText(statusText))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(fullText))
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setOngoing(true)
             .setSilent(true)

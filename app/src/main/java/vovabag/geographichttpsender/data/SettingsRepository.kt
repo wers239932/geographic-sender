@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import vovabag.geographichttpsender.model.GlobalSettings
 import vovabag.geographichttpsender.model.PointFolder
 import vovabag.geographichttpsender.model.TargetPoint
 
@@ -32,6 +33,7 @@ class SettingsRepository(context: Context) {
     private val TARGET_POINTS_KEY = stringPreferencesKey("target_points")
     private val POINT_FOLDERS_KEY = stringPreferencesKey("point_folders")
     private val SERVICE_RUNNING_KEY = booleanPreferencesKey("service_running")
+    private val GLOBAL_SETTINGS_KEY = stringPreferencesKey("global_settings")
 
     private val _targetPoints = MutableStateFlow<List<TargetPoint>>(emptyList())
     val targetPoints: StateFlow<List<TargetPoint>> = _targetPoints.asStateFlow()
@@ -42,6 +44,9 @@ class SettingsRepository(context: Context) {
     private val _serviceRunning = MutableStateFlow(false)
     val serviceRunning: StateFlow<Boolean> = _serviceRunning.asStateFlow()
 
+    private val _globalSettings = MutableStateFlow(GlobalSettings.DEFAULT)
+    val globalSettings: StateFlow<GlobalSettings> = _globalSettings.asStateFlow()
+
     init {
         // Load initial data once, then observe only specific keys to avoid excessive recompositions
         scope.launch {
@@ -51,6 +56,7 @@ class SettingsRepository(context: Context) {
             _pointFolders.value = initialFolders
             _targetPoints.value = initialPoints
             _serviceRunning.value = prefs[SERVICE_RUNNING_KEY] ?: false
+            _globalSettings.value = decodeGlobalSettings(prefs[GLOBAL_SETTINGS_KEY])
         }
 
         // Observe only points changes (not every preference change)
@@ -88,6 +94,16 @@ class SettingsRepository(context: Context) {
                 .distinctUntilChanged()
                 .collect { running ->
                     _serviceRunning.value = running
+                }
+        }
+
+        // Observe global settings changes
+        scope.launch {
+            dataStore.data
+                .map { prefs -> prefs[GLOBAL_SETTINGS_KEY] }
+                .distinctUntilChanged()
+                .collect { json ->
+                    _globalSettings.value = decodeGlobalSettings(json)
                 }
         }
     }
@@ -173,6 +189,18 @@ class SettingsRepository(context: Context) {
         _serviceRunning.value = running
     }
 
+    suspend fun saveGlobalSettings(settings: GlobalSettings) {
+        dataStore.edit { preferences ->
+            preferences[GLOBAL_SETTINGS_KEY] = gson.toJson(settings)
+        }
+        _globalSettings.value = settings
+    }
+
+    suspend fun getGlobalSettingsOnce(): GlobalSettings {
+        val prefs = dataStore.data.first()
+        return decodeGlobalSettings(prefs[GLOBAL_SETTINGS_KEY])
+    }
+
     private fun decodePoints(json: String?): List<TargetPoint> {
         val type = object : TypeToken<List<TargetPoint>>() {}.type
         return runCatching { gson.fromJson<List<TargetPoint>>(json ?: "[]", type) }
@@ -185,6 +213,12 @@ class SettingsRepository(context: Context) {
         return runCatching { gson.fromJson<List<PointFolder>>(json ?: "[]", type) }
             .getOrNull()
             .orEmpty()
+    }
+
+    private fun decodeGlobalSettings(json: String?): GlobalSettings {
+        return runCatching { gson.fromJson<GlobalSettings>(json, GlobalSettings::class.java) }
+            .getOrNull()
+            ?: GlobalSettings.DEFAULT
     }
 
     private fun sanitizePoints(points: List<TargetPoint>, folders: List<PointFolder>): List<TargetPoint> {
