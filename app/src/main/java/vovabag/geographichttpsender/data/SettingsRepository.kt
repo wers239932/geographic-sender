@@ -11,9 +11,13 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import vovabag.geographichttpsender.model.PointFolder
 import vovabag.geographichttpsender.model.TargetPoint
@@ -23,7 +27,7 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 class SettingsRepository(context: Context) {
     private val dataStore = context.dataStore
     private val gson = Gson()
-    private val scope = CoroutineScope(Dispatchers.IO)
+    private val scope = CoroutineScope(Dispatchers.IO + Job())
 
     private val TARGET_POINTS_KEY = stringPreferencesKey("target_points")
     private val POINT_FOLDERS_KEY = stringPreferencesKey("point_folders")
@@ -39,23 +43,52 @@ class SettingsRepository(context: Context) {
     val serviceRunning: StateFlow<Boolean> = _serviceRunning.asStateFlow()
 
     init {
+        // Load initial data once, then observe only specific keys to avoid excessive recompositions
         scope.launch {
-            dataStore.data.collect { preferences ->
-                val folders = decodeFolders(preferences[POINT_FOLDERS_KEY])
-                val points = sanitizePoints(
-                    points = decodePoints(preferences?.get(TARGET_POINTS_KEY)),
-                    folders = folders
-                )
-                _pointFolders.value = folders
-                _targetPoints.value = points
+            val prefs = dataStore.data.first()
+            val initialFolders = decodeFolders(prefs[POINT_FOLDERS_KEY])
+            val initialPoints = sanitizePoints(decodePoints(prefs[TARGET_POINTS_KEY]), initialFolders)
+            _pointFolders.value = initialFolders
+            _targetPoints.value = initialPoints
+            _serviceRunning.value = prefs[SERVICE_RUNNING_KEY] ?: false
+        }
 
-                if (points != decodePoints(preferences?.get(TARGET_POINTS_KEY))) {
-                    saveTargetPoints(points)
+        // Observe only points changes (not every preference change)
+        scope.launch {
+            dataStore.data
+                .map { prefs -> prefs[TARGET_POINTS_KEY] }
+                .distinctUntilChanged()
+                .collect { json ->
+                    val folders = _pointFolders.value
+                    val points = sanitizePoints(decodePoints(json), folders)
+                    _targetPoints.value = points
                 }
+        }
 
-                val serviceRunning = preferences[SERVICE_RUNNING_KEY] ?: false
-                _serviceRunning.value = serviceRunning
-            }
+        // Observe only folder changes
+        scope.launch {
+            dataStore.data
+                .map { prefs -> prefs[POINT_FOLDERS_KEY] }
+                .distinctUntilChanged()
+                .collect { json ->
+                    val folders = decodeFolders(json)
+                    _pointFolders.value = folders
+                    // Re-sanitize points when folders change
+                    val points = sanitizePoints(decodePoints(
+                        dataStore.data.first()[TARGET_POINTS_KEY]
+                    ), folders)
+                    _targetPoints.value = points
+                }
+        }
+
+        // Observe only service running state
+        scope.launch {
+            dataStore.data
+                .map { prefs -> prefs[SERVICE_RUNNING_KEY] ?: false }
+                .distinctUntilChanged()
+                .collect { running ->
+                    _serviceRunning.value = running
+                }
         }
     }
 
