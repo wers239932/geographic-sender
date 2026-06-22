@@ -158,6 +158,13 @@ class GeofenceService : Service() {
         }
     }
 
+    private fun stopLocationUpdates() {
+        locationCallback?.let {
+            fusedLocationClient.removeLocationUpdates(it)
+        }
+        locationCallback = null
+    }
+
     private fun stopNotificationUpdater() {
         notificationUpdateJob?.cancel()
         notificationUpdateJob = null
