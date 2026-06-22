@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import vovabag.geographichttpsender.GeofenceService
 import vovabag.geographichttpsender.data.SettingsRepository
+import vovabag.geographichttpsender.model.GlobalSettings
 import vovabag.geographichttpsender.model.PointFolder
 import vovabag.geographichttpsender.model.TargetPoint
 import vovabag.geographichttpsender.network.HttpClient
@@ -26,6 +27,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isServiceRunning = MutableStateFlow(false)
     val isServiceRunning: StateFlow<Boolean> = _isServiceRunning.asStateFlow()
+
+    private val _globalSettings = MutableStateFlow(GlobalSettings.DEFAULT)
+    val globalSettings: StateFlow<GlobalSettings> = _globalSettings.asStateFlow()
 
     private val _testResults = MutableStateFlow<Map<String, TestResult>>(emptyMap())
     val testResults: StateFlow<Map<String, TestResult>> = _testResults.asStateFlow()
@@ -49,6 +53,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.serviceRunning.collect { running ->
                 _isServiceRunning.value = running
+            }
+        }
+
+        viewModelScope.launch {
+            repository.globalSettings.collect { settings ->
+                _globalSettings.value = settings
             }
         }
     }
@@ -103,6 +113,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun deletePoint(id: String) {
         viewModelScope.launch {
             repository.deleteTargetPoint(id)
+        }
+    }
+
+    fun saveGlobalSettings(settings: GlobalSettings) {
+        viewModelScope.launch {
+            repository.saveGlobalSettings(settings)
         }
     }
 
